@@ -8,6 +8,12 @@ More is a growing collection of (MIT licensed) Windows Forms Controls for .NET C
 
 # What's New?
 ~~~
+**2025-03-05** Platcham Fork:
+    * Set target to .NET 8.0, Windows 10.0.26100.0
+    * Changes to Monitors.cs:
+        * Updated to allow for seleciting multiple monitors at once.
+        * Updated to correctly account for display scaling on each monitor
+        * Fixed a bug that would cause a crash when you clicked outside of a monitor area.
 **2022-05-21** Documented the Navigator and the Listing.
 **2022-02-06** Added the Navigator control.
 **2022-02-05** Added the Listing control for displaying source code. 

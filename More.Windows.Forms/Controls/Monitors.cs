@@ -11,18 +11,73 @@
  * 
  * 01.02.2021   tstih
  * 
+ * 3.5.2025 platcham - 
+ * Changes:
+ *      changed to .net8.0 and targeting windows 10.0.26100.0
+ *      added multi monitor selection 
+ *      fixed bug with clicking outside of monitors causing crashes
+ *      Corrected for displays with different scaling factors
  */
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace More.Windows.Forms
 {
     public class Monitors : ControlBase
     {
+        #region EnumDisplayDevices Definition
+
+        // create structure for enumDisplayDevices to enable getting scaling factor
+        [StructLayout(LayoutKind.Sequential)]
+        public struct DEVMODE
+        {
+            private const int CCHDEVICENAME = 0x20;
+            private const int CCHFORMNAME = 0x20;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 0x20)]
+            public string dmDeviceName;
+            public short dmSpecVersion;
+            public short dmDriverVersion;
+            public short dmSize;
+            public short dmDriverExtra;
+            public int dmFields;
+            public int dmPositionX;
+            public int dmPositionY;
+            public ScreenOrientation dmDisplayOrientation;
+            public int dmDisplayFixedOutput;
+            public short dmColor;
+            public short dmDuplex;
+            public short dmYResolution;
+            public short dmTTOption;
+            public short dmCollate;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 0x20)]
+            public string dmFormName;
+            public short dmLogPixels;
+            public int dmBitsPerPel;
+            public int dmPelsWidth;
+            public int dmPelsHeight;
+            public int dmDisplayFlags;
+            public int dmDisplayFrequency;
+            public int dmICMMethod;
+            public int dmICMIntent;
+            public int dmMediaType;
+            public int dmDitherType;
+            public int dmReserved1;
+            public int dmReserved2;
+            public int dmPanningWidth;
+            public int dmPanningHeight;
+        }
+
+        [DllImport("user32.dll")]
+        public static extern bool EnumDisplaySettings(string lpszDeviceName, int iModeNum, ref DEVMODE lpDevMode);
+
+
+        #endregion
+
         #region Private(s)
         // Screen rectangles.
         private List<Rectangle> _srects;
@@ -47,6 +102,11 @@ namespace More.Windows.Forms
             // Active screen is first screen.
             _selected = -1;
             _active = -1;
+
+            //Multi select is off by default
+            _allowMultiSelect = false;
+            _multiSelected = new List<int>();
+            _multiSelected.Add(0);
 
             // Colours.
             _monitorBackColor = Color.FromKnownColor(KnownColor.InactiveCaption);
@@ -104,21 +164,52 @@ namespace More.Windows.Forms
             if (under != _active) { _active = under; Invalidate(); }
         }
 
+
         protected override void OnMouseClick(MouseEventArgs e)
         {
             // What is under the mouse?
             int under = GetIndexAt(e.Location);
 
-            // Click on selected again?
-            if (under == _selected || under==-1)
+            //if multiselect is allowed, add or remove monitor from selected list
+            if (_allowMultiSelect)
             {
-                _selected = -1;// Unselect!
-                MonitorUnselected.Raise(this, new MonitorEventArgs() { MonitorIndex = under, Screen=Screen.AllScreens[under] });
-            } else {
-                _selected = under;
-                MonitorSelected.Raise(this, new MonitorEventArgs() { MonitorIndex = under, Screen = Screen.AllScreens[under] });
+                // Click on selected again?
+                if (_multiSelected.Contains(under) && under != -1)
+                {
+                    _multiSelected.Remove(under);
+                    MonitorUnselected.Raise(this, new MonitorEventArgs() { MonitorIndex = under, Screen = Screen.AllScreens[under] });
+                }
+                else if (under == -1)
+                {
+                    // do nothing, clicked outside of monitors
+                }
+                else
+                {
+                    // add monitor to selected list
+                    _multiSelected.Add(under);
+                    MonitorSelected.Raise(this, new MonitorEventArgs() { MonitorIndex = under, Screen = Screen.AllScreens[under] });
+                }
             }
-            Invalidate();
+            else
+            {
+                // Click on selected again?
+                if (under == _selected && under != -1)
+                {
+                    _selected = -1;// Unselect!
+                    MonitorUnselected.Raise(this, new MonitorEventArgs() { MonitorIndex = under, Screen = Screen.AllScreens[under] });
+                }
+                else if (under == -1)
+                {
+                    //do nothing, clicked outside of monitors
+                }
+                else
+                {
+                    _selected = under;
+                    MonitorSelected.Raise(this, new MonitorEventArgs() { MonitorIndex = under, Screen = Screen.AllScreens[under] });
+                }
+                Invalidate();
+            }
+            
         }
         #endregion // Override(s)
 
@@ -137,6 +228,30 @@ namespace More.Windows.Forms
         /// </summary>
         [Description("0 based index of selected monitor. Selected monitor is highlighted."), Category("Appearance")]
         public int Selected { get { return _selected; } set { _selected = value; Invalidate(); } }
+
+        private bool _allowMultiSelect;
+        /// <summary>
+        /// bool to allow multiple monitors to be selected
+        /// </summary>
+        [Description("bool to allow multiple monitors to be selected"), Category("Appearance")]
+        public bool AllowMultiSelect { get { return _allowMultiSelect; } set { _allowMultiSelect = value; Invalidate(); } }
+
+        private List<int> _multiSelected;
+        /// <summary>
+        /// list of selected monitors when AllowMultiSelect is true
+        /// </summary>
+        public List<int> MultiSelected
+        {
+            get
+            {
+                return _multiSelected;
+            }
+            set
+            {
+                _multiSelected = value;
+                Invalidate();
+            }
+        }
 
         private int _active;
         /// <summary>
@@ -271,33 +386,72 @@ namespace More.Windows.Forms
 
         private Color GetMonitorBackColor(int i)
         {
-            if (i == _selected)
-                return _selectedMonitorBackColor;
-            else if (i == _active)
-                return _activeMonitorBackColor;
+            if (_allowMultiSelect)
+            {
+                if (_multiSelected == null)
+                    _multiSelected = new List<int>();
+                
+                if (_multiSelected.Contains(i))
+                    return _selectedMonitorBackColor;
+                else if (i == _active)
+                    return _activeMonitorBackColor;
+                else
+                    return _monitorBackColor;
+            }
             else
-                return _monitorBackColor;
+            {
+                if (i == _selected)
+                    return _selectedMonitorBackColor;
+                else if (i == _active)
+                    return _activeMonitorBackColor;
+                else
+                    return _monitorBackColor;
+            }
         }
 
         private Color GetMonitorTextBackColor(int i)
         {
-            if (i == _selected)
-                return _selectedMonitorTextBackColor;
-            else if (i == _active)
-                return _activeMonitorTextBackColor;
+            if (_allowMultiSelect)
+            {
+                if (_multiSelected.Contains(i))
+                    return _selectedMonitorTextBackColor;
+                else if (i == _active)
+                    return _activeMonitorTextBackColor;
+                else
+                    return _monitorTextBackColor;
+            }
             else
-                return _monitorTextBackColor;
+            {
+                if (i == _selected)
+                    return _selectedMonitorTextBackColor;
+                else if (i == _active)
+                    return _activeMonitorTextBackColor;
+                else
+                    return _monitorTextBackColor;
+            }
         }
 
 
         private Color GetMonitorTextForeColor(int i)
         {
-            if (i == _selected)
-                return _selectedMonitorTextForeColor;
-            else if (i == _active)
-                return _activeMonitorTextForeColor;
+            if (_allowMultiSelect)
+            {
+                if (_multiSelected.Contains(i))
+                    return _selectedMonitorTextForeColor;
+                else if (i == _active)
+                    return _activeMonitorTextForeColor;
+                else
+                    return _monitorTextForeColor;
+            }
             else
-                return _monitorTextForeColor;
+            {
+                if (i == _selected)
+                    return _selectedMonitorTextForeColor;
+                else if (i == _active)
+                    return _activeMonitorTextForeColor;
+                else
+                    return _monitorTextForeColor;
+            }
         }
 
         private void DrawMonitor(Graphics g, Rectangle r, int i) { 
@@ -346,11 +500,21 @@ namespace More.Windows.Forms
             int minx=int.MaxValue, miny=int.MaxValue, maxx=int.MinValue, maxy=int.MinValue;
             foreach(var s in Screen.AllScreens)
             {
+                // get scaled bounds
+                DEVMODE dm = new DEVMODE();
+                dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
+                EnumDisplaySettings(s.DeviceName, -1, ref dm);
+
+                var scalingFactor = Math.Round(Decimal.Divide(dm.dmPelsWidth, s.Bounds.Width), 2);
+                var newBounds = new Rectangle(s.Bounds.X, s.Bounds.Y, (int)Math.Round(s.Bounds.Width * scalingFactor), (int)Math.Round(s.Bounds.Height * scalingFactor));
+                var newBoundsRight = s.Bounds.Left + newBounds.Width;
+                var newBoundsBottom = s.Bounds.Top + newBounds.Height;
+
                 // And recalc min and max values.
                 if (s.Bounds.Left < minx) minx = s.Bounds.Left;
-                if (s.Bounds.Right > maxx) maxx = s.Bounds.Right;
+                if (newBoundsRight > maxx) maxx = newBoundsRight;
                 if (s.Bounds.Top < miny) miny = s.Bounds.Top;
-                if (s.Bounds.Bottom > maxy) maxy = s.Bounds.Bottom;
+                if (newBoundsBottom > maxy) maxy = newBoundsBottom;
             }
 
             // Calculate size to fit factor.
@@ -364,16 +528,25 @@ namespace More.Windows.Forms
                 );
             float f = totalRect.SizeToFitFactor(client);
 
+
             // And recalculate all rectangles.
             foreach (var s in Screen.AllScreens)
             {
+                // get scaled bounds
+                DEVMODE dm = new DEVMODE();
+                dm.dmSize = (short)Marshal.SizeOf(typeof(DEVMODE));
+                EnumDisplaySettings(s.DeviceName, -1, ref dm);
+
+                var scalingFactor = Math.Round(Decimal.Divide(dm.dmPelsWidth, s.Bounds.Width), 2);
+                var newBounds = new Rectangle(s.Bounds.X, s.Bounds.Y, (int)Math.Round(s.Bounds.Width * scalingFactor), (int)Math.Round(s.Bounds.Height * scalingFactor));
+
                 // Get screen rectangle.
                 // To draw at 0,0 you will have to offset all rectangles by minx, miny.
                 RectangleF srect = new RectangleF(
                     Margin.Left + (s.Bounds.Left - minx) * f + Padding.Left,
                     Margin.Top + (s.Bounds.Top - miny) * f + Padding.Top,
-                    (float)(s.Bounds.Width) * f - Padding.Left - Padding.Right,
-                    (float)(s.Bounds.Height) * f - Padding.Top - Padding.Bottom
+                    (float)(newBounds.Width) * f - Padding.Left - Padding.Right,
+                    (float)(newBounds.Height) * f - Padding.Top - Padding.Bottom
                     );
 
                 // And add it.

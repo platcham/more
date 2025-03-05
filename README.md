@@ -1,4 +1,9 @@
 ![status.badge] [![language.badge]][language.url] [![uilib.badge]][uilib.url] [![standard.badge]][standard.url] [![license.badge]][license.url]
+# What's different in this fork?
+I've mainly updated the target to .NET 8.0, as well as updated Monitors.cs to fix some bugs, account for display scaling, and allow multiple monitor selection. All other functions are as they were in main repo. 
+
+Note: I am not a programmer by trade. I make no guarantees to the quality of the code I've added...
+
 
 # More
 

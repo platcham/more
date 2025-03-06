@@ -17,6 +17,7 @@
  *      added multi monitor selection 
  *      fixed bug with clicking outside of monitors causing crashes
  *      Corrected for displays with different scaling factors
+ *      display indexes now based off of display name in Screen.AllScreens (so \\.\\DISPLAY1 is 1, etc)
  */
 using System;
 using System.Collections.Generic;
@@ -25,6 +26,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
+using System.Linq;
 
 namespace More.Windows.Forms
 {
@@ -80,7 +82,7 @@ namespace More.Windows.Forms
 
         #region Private(s)
         // Screen rectangles.
-        private List<Rectangle> _srects;
+        private List<MonitorRectangle> _srects;
         #endregion // Private(s)
 
         #region Ctor
@@ -138,16 +140,15 @@ namespace More.Windows.Forms
             // First layout monitors.
             DoLayout();
 
+
             // Now draw.
-            int i = 0;
-            foreach(Rectangle r in _srects)
+            foreach(MonitorRectangle r in _srects)
             {
-                if (r.Width > 8 && r.Height > 8)
+                if (r.Rectangle.Width > 8 && r.Rectangle.Height > 8)
                 {
-                    DrawMonitor(g, r, i);
-                    if (_showEdge) DrawEdge(g, r);
-                    if (_showNumber) DrawMonitorNumber(g, r, i);
-                    i++;
+                    DrawMonitor(g, r.Rectangle, r.Index);
+                    if (_showEdge) DrawEdge(g, r.Rectangle);
+                    if (_showNumber) DrawMonitorNumber(g, r.Rectangle, r.Index);
                 }
             }
         }
@@ -169,6 +170,7 @@ namespace More.Windows.Forms
         {
             // What is under the mouse?
             int under = GetIndexAt(e.Location);
+            Screen underScreen = GetScreenAtIndex(under);
 
             //if multiselect is allowed, add or remove monitor from selected list
             if (_allowMultiSelect)
@@ -177,7 +179,7 @@ namespace More.Windows.Forms
                 if (_multiSelected.Contains(under) && under != -1)
                 {
                     _multiSelected.Remove(under);
-                    MonitorUnselected.Raise(this, new MonitorEventArgs() { MonitorIndex = under, Screen = Screen.AllScreens[under] });
+                    MonitorUnselected.Raise(this, new MonitorEventArgs() { MonitorIndex = under, Screen = underScreen });
                 }
                 else if (under == -1)
                 {
@@ -187,7 +189,7 @@ namespace More.Windows.Forms
                 {
                     // add monitor to selected list
                     _multiSelected.Add(under);
-                    MonitorSelected.Raise(this, new MonitorEventArgs() { MonitorIndex = under, Screen = Screen.AllScreens[under] });
+                    MonitorSelected.Raise(this, new MonitorEventArgs() { MonitorIndex = under, Screen = underScreen });
                 }
             }
             else
@@ -196,7 +198,7 @@ namespace More.Windows.Forms
                 if (under == _selected && under != -1)
                 {
                     _selected = -1;// Unselect!
-                    MonitorUnselected.Raise(this, new MonitorEventArgs() { MonitorIndex = under, Screen = Screen.AllScreens[under] });
+                    MonitorUnselected.Raise(this, new MonitorEventArgs() { MonitorIndex = under, Screen = underScreen });
                 }
                 else if (under == -1)
                 {
@@ -205,7 +207,7 @@ namespace More.Windows.Forms
                 else
                 {
                     _selected = under;
-                    MonitorSelected.Raise(this, new MonitorEventArgs() { MonitorIndex = under, Screen = Screen.AllScreens[under] });
+                    MonitorSelected.Raise(this, new MonitorEventArgs() { MonitorIndex = under, Screen = underScreen });
                 }
                 Invalidate();
             }
@@ -224,9 +226,9 @@ namespace More.Windows.Forms
         #region Properties
         private int _selected;
         /// <summary>
-        /// 0 based index of selected monitor. Selected monitor is highlighted.
+        /// Display number of selected monitor. Selected monitor is highlighted.
         /// </summary>
-        [Description("0 based index of selected monitor. Selected monitor is highlighted."), Category("Appearance")]
+        [Description("Display Number of selected monitor. Selected monitor is highlighted."), Category("Appearance")]
         public int Selected { get { return _selected; } set { _selected = value; Invalidate(); } }
 
         private bool _allowMultiSelect;
@@ -255,9 +257,9 @@ namespace More.Windows.Forms
 
         private int _active;
         /// <summary>
-        /// 0 based index of active monitor. Active monitor is temporarily of different color (as long as mouse is over it).
+        /// Display Number of active monitor. Active monitor is temporarily of different color (as long as mouse is over it).
         /// </summary>
-        [Description("0 based index of active monitor.Active monitor is temporarily of different color(as long as mouse is over it)."), Category("Appearance")]
+        [Description("Display Number of active monitor.Active monitor is temporarily of different color(as long as mouse is over it)."), Category("Appearance")]
         public int Active { get { return _active; } set { _active = value; Invalidate(); } }
 
         private Color _monitorBackColor;
@@ -374,14 +376,23 @@ namespace More.Windows.Forms
             if (_srects == null) return -1;
 
             // Get index.
-            int i = 0;
             int under = -1;
-            foreach (Rectangle mon in _srects)
+            foreach (MonitorRectangle mon in _srects)
             {
-                if (mon.Contains(pt)) under = i;
-                i++;
+                if (mon.Rectangle.Contains(pt)) under = mon.Index;
             }
             return under;
+        }
+
+        private Screen GetScreenAtIndex(int index)
+        {
+            for (int i =0; i < Screen.AllScreens.Length; i++)
+            {
+                if (int.Parse(new string(Screen.AllScreens[i].DeviceName.Where(c => char.IsDigit(c)).ToArray())) == index)
+                    return Screen.AllScreens[i];
+            }
+
+            return null;
         }
 
         private Color GetMonitorBackColor(int i)
@@ -476,7 +487,7 @@ namespace More.Windows.Forms
         }
 
         private void DrawMonitorNumber(Graphics g, Rectangle r, int i) {
-            string s = (i+1).ToString();
+            string s = (i).ToString();
             float fontSize = Font.Size; // Measure font size.
             SizeF textSize = g.MeasureString(s, Font); // Measure text size for font.
             float vratio = textSize.Height / fontSize;
@@ -494,7 +505,7 @@ namespace More.Windows.Forms
         private void DoLayout()
         {
             // Initiate screen rectangles.
-            _srects = new List<Rectangle>();
+            _srects = new List<MonitorRectangle>();
 
             // Iterate screens to find total dimensions.
             int minx=int.MaxValue, miny=int.MaxValue, maxx=int.MinValue, maxy=int.MinValue;
@@ -550,7 +561,10 @@ namespace More.Windows.Forms
                     );
 
                 // And add it.
-                _srects.Add(Rectangle.Round(srect));
+                MonitorRectangle mr = new MonitorRectangle();
+                mr.Index = int.Parse(new string(s.DeviceName.Where(c => char.IsDigit(c)).ToArray()));
+                mr.Rectangle = Rectangle.Round(srect);
+                _srects.Add(mr);
             }
         }
 
@@ -575,5 +589,11 @@ namespace More.Windows.Forms
     {
         public Screen Screen { get; internal set; }
         public int MonitorIndex { get; internal set; }
+    }
+
+    public class MonitorRectangle
+    {
+        public Rectangle Rectangle { get; internal set; }
+        public int Index { get; internal set; }
     }
 }
